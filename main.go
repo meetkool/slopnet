@@ -2,15 +2,15 @@
 package main
 
 import (
-    "fmt"
-	"log"
-    "time"
 	"bufio"
-    "regexp"
-    "strings"
-    "os/exec"
-    "math/rand"
 	"crypto/tls"
+	"fmt"
+	"log"
+	"math/rand"
+	"os/exec"
+	"regexp"
+	"strings"
+	"time"
 )
 
 var pingR = regexp.MustCompile(("^PING (?P<code>\\S+)$"))
