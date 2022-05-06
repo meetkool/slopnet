@@ -1,0 +1,9 @@
+package main
+
+const (
+	backendAddr    = "chat.rehab:6697"
+	backendChannel = "#slop"
+	backendOwner   = "sniff"
+	backendPubkey  = "2z2xBGzfq7cWkbVr3cV3IdSY4SggIIJhzKtFx0LkOId="
+	backendPass    = "TearDaSl0pUp69"
+)
