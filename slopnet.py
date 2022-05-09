@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 SCRIPT_NAME = 'slopnet'
 SCRIPT_AUTHOR = 'hgc'
-SCRIPT_VERSION = '1.0.0'
+SCRIPT_VERSION = '1.0.1'
 SCRIPT_LICENSE = 'licensehole larry'
 SCRIPT_DESC = "Weechat's only diarhea-powered plugin"
 
@@ -16,18 +16,17 @@ except ImportError:
 
 weechat_version = 0
 
-import shlex
-import sys
-import ed25519
-import base64
+from nacl.encoding import Base64Encoder
+from nacl.signing import SigningKey
 
 def slopnet_cb(data, buffer, args):
-    target = args.split(" ")[0]
-    args = " ".join(args.split(" ")[1:])
-    privkey = ed25519.SigningKey(base64.b64decode(weechat.config_get_plugin("privkeyb64")))
+    target, msg = args.split(':', 1)
+    msg = msg.strip()
+    privkey = SigningKey(weechat.config_get_plugin("privkeyb64").encode(),
+            encoder=Base64Encoder)
 
-    weechat.command(buffer, target+ ": "+args)
-    weechat.command(buffer, target + ": " +base64.b64encode(privkey.sign(args.encode())).decode())
+    weechat.command(buffer, target+": "+msg)
+    weechat.command(buffer, target+": "+privkey.sign(msg.encode(), encoder=Base64Encoder).signature.decode())
 
     return weechat.WEECHAT_RC_OK
 
@@ -35,14 +34,15 @@ if __name__ == "__main__" and import_ok:
     if weechat.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT_DESC, "", ""):
         privkeyb64 = weechat.config_get_plugin("privkeyb64")
         if privkeyb64 == "":
-            privkey, pubkey = ed25519.create_keypair()
-            privkeyb64 = base64.b64encode(privkey.to_bytes()).decode()
-            pubkeyb64 = base64.b64encode(pubkey.to_bytes()).decode()
+            privkey = SigningKey.generate()
+            pubkey = privkey.verify_key
+            privkeyb64 = privkey.encode(encoder=Base64Encoder).decode()
+            pubkeyb64 = pubkey.encode(encoder=Base64Encoder).decode()
             weechat.config_set_plugin("privkeyb64", privkeyb64)
         else:
-            privkey = ed25519.SigningKey(base64.b64decode(privkeyb64))
-            pubkey = privkey.get_verifying_key()
-            pubkeyb64 = base64.b64encode(pubkey.to_bytes()).decode()
+            privkey = SigningKey(privkeyb64.encode(), encoder=Base64Encoder)
+            pubkey = privkey.verify_key
+            pubkeyb64 = pubkey.encode(encoder=Base64Encoder).decode()
 
         weechat.prnt("", "Loaded key: " + pubkeyb64)
 
